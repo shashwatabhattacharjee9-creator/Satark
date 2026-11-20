@@ -323,12 +323,28 @@ export function LivePrototypeSection() {
           }),
         });
 
-        const payload = (await response.json()) as Partial<CallAnalysisResult> & {
-          error?: string;
-        };
+        const rawText = await response.text();
+        let payload: (Partial<CallAnalysisResult> & { error?: string }) | null = null;
+        try {
+          payload = rawText
+            ? (JSON.parse(rawText) as Partial<CallAnalysisResult> & { error?: string })
+            : null;
+        } catch {
+          payload = null;
+        }
 
-        if (!response.ok) {
-          throw new Error(payload.error || `Server returned ${response.status}`);
+        if (!response.ok || !payload) {
+          if (response.status === 404) {
+            throw new Error(
+              'API endpoint /api/satark/analyze-call was not found. Redeploy with the /api folder and vercel.json included.'
+            );
+          }
+          throw new Error(
+            payload?.error ||
+              (response.status === 504
+                ? 'Gemini analysis timed out. Please retry.'
+                : `Server returned HTTP ${response.status}. Ensure GEMINI_API_KEY is set in your server environment variables.`)
+          );
         }
         if (seq !== analysisSeqRef.current) return;
 
@@ -583,9 +599,26 @@ export function LivePrototypeSection() {
           body: JSON.stringify({ imageBase64: dataUrl, mimeType }),
         });
 
-        const payload = (await response.json()) as Partial<WarrantVerdict> & { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error || `Server returned ${response.status}`);
+        const rawText = await response.text();
+        let payload: (Partial<WarrantVerdict> & { error?: string }) | null = null;
+        try {
+          payload = rawText
+            ? (JSON.parse(rawText) as Partial<WarrantVerdict> & { error?: string })
+            : null;
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok || !payload) {
+          if (response.status === 404) {
+            throw new Error(
+              'API endpoint /api/satark/scan-warrant was not found. Redeploy with the /api folder and vercel.json included.'
+            );
+          }
+          throw new Error(
+            payload?.error ||
+              `Server returned HTTP ${response.status}. Ensure GEMINI_API_KEY is configured in your environment variables.`
+          );
         }
 
         const verdict: WarrantVerdict = {

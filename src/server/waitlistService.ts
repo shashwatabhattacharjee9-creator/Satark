@@ -1,12 +1,16 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import nodemailer from 'nodemailer';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DATA_DIR = path.resolve(__dirname, '../../data');
+const DATA_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'satark-waitlist')
+  : path.resolve(__dirname, '../../data');
 const WAITLIST_FILE = path.join(DATA_DIR, 'waitlist.json');
+let memoryFallbackStore: WaitlistEntry[] = [];
 
 export type WaitlistChannel = 'email' | 'whatsapp';
 export type WaitlistTrack = 'family' | 'partner';
@@ -85,29 +89,38 @@ interface EtherealCredentials {
 let cachedEtherealAccount: EtherealCredentials | null = null;
 
 function ensureStore(): WaitlistEntry[] {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(WAITLIST_FILE)) {
-    fs.writeFileSync(WAITLIST_FILE, '[]', 'utf8');
-    return [];
-  }
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(WAITLIST_FILE)) {
+      fs.writeFileSync(WAITLIST_FILE, '[]', 'utf8');
+      return memoryFallbackStore.slice();
+    }
     const raw = fs.readFileSync(WAITLIST_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as WaitlistEntry[]) : [];
+    if (Array.isArray(parsed)) {
+      memoryFallbackStore = parsed as WaitlistEntry[];
+      return memoryFallbackStore.slice();
+    }
+    return memoryFallbackStore.slice();
   } catch {
-    return [];
+    return memoryFallbackStore.slice();
   }
 }
 
 function saveStore(entries: WaitlistEntry[]): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  memoryFallbackStore = entries.slice();
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmpFile = `${WAITLIST_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(entries, null, 2), 'utf8');
+    fs.renameSync(tmpFile, WAITLIST_FILE);
+  } catch {
+    // Read-only filesystem fallback already retained in memoryFallbackStore
   }
-  const tmpFile = `${WAITLIST_FILE}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(entries, null, 2), 'utf8');
-  fs.renameSync(tmpFile, WAITLIST_FILE);
 }
 
 export function detectAndNormalizeContact(rawContact: string): {
