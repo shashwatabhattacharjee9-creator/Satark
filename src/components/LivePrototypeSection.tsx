@@ -216,6 +216,9 @@ export function LivePrototypeSection() {
   const micShouldContinueRef = useRef(false);
   const loggedCallAlertRef = useRef(false);
   const toastTimerRef = useRef<number | null>(null);
+  const analysisAbortRef = useRef<AbortController | null>(null);
+  const interimScoreTimerRef = useRef<number | null>(null);
+  const lastEarlyScoredRef = useRef<string>('');
 
   useEffect(() => {
     turnsRef.current = turns;
@@ -250,6 +253,8 @@ export function LivePrototypeSection() {
     return () => {
       scenarioTimersRef.current.forEach((id) => window.clearTimeout(id));
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+      if (interimScoreTimerRef.current) window.clearTimeout(interimScoreTimerRef.current);
+      analysisAbortRef.current?.abort();
       micShouldContinueRef.current = false;
       try {
         recognitionRef.current?.stop();
@@ -290,6 +295,11 @@ export function LivePrototypeSection() {
     micShouldContinueRef.current = false;
     setIsMicListening(false);
     setInterimTranscript('');
+    if (interimScoreTimerRef.current) {
+      window.clearTimeout(interimScoreTimerRef.current);
+      interimScoreTimerRef.current = null;
+    }
+    lastEarlyScoredRef.current = '';
     try {
       recognitionRef.current?.stop();
     } catch {
@@ -306,6 +316,11 @@ export function LivePrototypeSection() {
       const windowTurns = allTurns.filter((t) => t.timestampMs >= cutoff);
       if (windowTurns.length === 0) return;
 
+      // Cancel any slower superseded in-flight request immediately
+      analysisAbortRef.current?.abort();
+      const controller = new AbortController();
+      analysisAbortRef.current = controller;
+
       const seq = ++analysisSeqRef.current;
       setIsAnalyzing(true);
       setCallApiError(null);
@@ -314,6 +329,7 @@ export function LivePrototypeSection() {
         const response = await fetch('/api/satark/analyze-call', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             turns: windowTurns.map((t) => ({
               speaker: t.speaker,
@@ -375,6 +391,7 @@ export function LivePrototypeSection() {
           }
         }
       } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         if (seq !== analysisSeqRef.current) return;
         setCallApiError(
           err instanceof Error ? err.message : 'Unable to reach Gemini call analysis endpoint.'
@@ -435,13 +452,58 @@ export function LivePrototypeSection() {
           const result = event.results[i];
           const text = result[0]?.transcript ?? '';
           if (result.isFinal) {
+            if (interimScoreTimerRef.current) {
+              window.clearTimeout(interimScoreTimerRef.current);
+              interimScoreTimerRef.current = null;
+            }
             setInterimTranscript('');
-            pushTurnAndAnalyze('Live Mic', text);
+            const cleanFinal = text.trim();
+            if (!cleanFinal) continue;
+            const normalizedFinal = cleanFinal.toLowerCase().replace(/\s+/g, ' ');
+            const alreadyScored = lastEarlyScoredRef.current === normalizedFinal;
+            lastEarlyScoredRef.current = '';
+
+            if (alreadyScored) {
+              // Commit finalized transcript bubble without redundant duplicate API call
+              const newTurn: TranscriptTurn = {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                speaker: 'Live Mic',
+                text: cleanFinal,
+                timestampMs: Date.now(),
+              };
+              const updated = [...turnsRef.current, newTurn];
+              turnsRef.current = updated;
+              setTurns(updated);
+              setNowMs(Date.now());
+            } else {
+              pushTurnAndAnalyze('Live Mic', cleanFinal);
+            }
           } else {
             interim += text;
           }
         }
-        if (interim) setInterimTranscript(interim.trim());
+        const trimmedInterim = interim.trim();
+        if (trimmedInterim) {
+          setInterimTranscript(trimmedInterim);
+          if (interimScoreTimerRef.current) {
+            window.clearTimeout(interimScoreTimerRef.current);
+          }
+          const wordCount = trimmedInterim.split(/\s+/).length;
+          if (wordCount >= 3) {
+            interimScoreTimerRef.current = window.setTimeout(() => {
+              const normalized = trimmedInterim.toLowerCase().replace(/\s+/g, ' ');
+              if (normalized === lastEarlyScoredRef.current) return;
+              lastEarlyScoredRef.current = normalized;
+              const previewTurn: TranscriptTurn = {
+                id: `interim-${Date.now()}`,
+                speaker: 'Live Mic',
+                text: trimmedInterim,
+                timestampMs: Date.now(),
+              };
+              void evaluateConversationWindow([...turnsRef.current, previewTurn]);
+            }, 650);
+          }
+        }
       };
 
       recognition.onerror = (event: { error: string }) => {
@@ -474,7 +536,14 @@ export function LivePrototypeSection() {
       setMicError('Could not start browser microphone.');
       stopMic();
     }
-  }, [clearScenarioTimers, isMicListening, pushTurnAndAnalyze, showToast, stopMic]);
+  }, [
+    clearScenarioTimers,
+    evaluateConversationWindow,
+    isMicListening,
+    pushTurnAndAnalyze,
+    showToast,
+    stopMic,
+  ]);
 
   const handleRunScenario = useCallback(
     (scenario: DemoScenario) => {
@@ -512,6 +581,7 @@ export function LivePrototypeSection() {
   const handleResetSession = useCallback(() => {
     stopMic();
     clearScenarioTimers();
+    analysisAbortRef.current?.abort();
     analysisSeqRef.current++;
     loggedCallAlertRef.current = false;
     turnsRef.current = [];

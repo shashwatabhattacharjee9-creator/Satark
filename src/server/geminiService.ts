@@ -1,7 +1,11 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
-export const PRIMARY_GEMINI_MODEL = 'gemini-4-hydrogen';
-export const FALLBACK_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+export const PRIMARY_GEMINI_MODEL = process.env.VERCEL
+  ? 'gemini-2.5-flash-lite'
+  : 'gemini-3.1-flash-lite';
+export const FALLBACK_GEMINI_MODEL = process.env.VERCEL
+  ? 'gemini-2.5-flash'
+  : 'gemini-2.5-flash-lite';
 
 const VALID_STAGES = new Set([
   'NOMINAL',
@@ -17,27 +21,69 @@ export interface IncomingTurn {
   timestampMs?: number;
 }
 
+const DEFAULT_MODEL_CHAIN: readonly string[] = process.env.VERCEL
+  ? ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.1-flash-lite']
+  : ['gemini-3.1-flash-lite', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-4-hydrogen'];
+
+let cachedWorkingModel: string | null = null;
+const unavailableModels = new Set<string>();
+const clientCache = new Map<string, GoogleGenAI>();
+
+function resolveGeminiApiKey(): string | null {
+  const candidates = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    process.env.API_KEY,
+  ];
+  for (const raw of candidates) {
+    const cleaned =
+      typeof raw === 'string' ? raw.trim().replace(/^["']|["']$/g, '') : '';
+    if (cleaned && cleaned !== 'MY_GEMINI_API_KEY') {
+      return cleaned;
+    }
+  }
+  return null;
+}
+
 function getGeminiClient(timeoutMs = 12_000): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+  const apiKey = resolveGeminiApiKey();
+  if (!apiKey) {
     const err = new Error(
-      'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in your Vercel Project Environment Variables (or AI Studio Secrets) and redeploy.'
+      'GEMINI_API_KEY is not configured on the server. Add GEMINI_API_KEY in Vercel Project Settings -> Environment Variables (Production + Preview) and Redeploy.'
     ) as Error & { status?: number };
     err.status = 503;
     throw err;
   }
-  return new GoogleGenAI({
+  const sdkTimeoutMs = Math.max(12_000, timeoutMs);
+  const cacheKey = `${apiKey.slice(-8)}:${sdkTimeoutMs}`;
+  const existing = clientCache.get(cacheKey);
+  if (existing) return existing;
+
+  const client = new GoogleGenAI({
     apiKey,
     httpOptions: {
-      timeout: timeoutMs,
+      timeout: sdkTimeoutMs,
       headers: {
         'User-Agent': 'aistudio-build',
       },
     },
   });
+  clientCache.set(cacheKey, client);
+  return client;
+}
+
+function isModelNotFoundError(error: unknown): boolean {
+  const status =
+    typeof error === 'object' && error !== null && 'status' in error
+      ? Number((error as { status?: unknown }).status)
+      : undefined;
+  const msg = error instanceof Error ? error.message.toLowerCase() : '';
+  return status === 404 || msg.includes('not found') || msg.includes('not_found');
 }
 
 function isTimeoutOrTransientError(error: unknown): boolean {
+  if (isModelNotFoundError(error)) return true;
   const status =
     typeof error === 'object' && error !== null && 'status' in error
       ? Number((error as { status?: unknown }).status)
@@ -47,50 +93,106 @@ function isTimeoutOrTransientError(error: unknown): boolean {
     status === 503 ||
     status === 504 ||
     status === 500 ||
-    status === 404 ||
+    status === 429 ||
     msg.includes('timeout') ||
     msg.includes('aborted') ||
-    msg.includes('deadline_exceeded') ||
-    msg.includes('not found')
+    msg.includes('deadline_exceeded')
   );
 }
 
-const MODEL_FALLBACK_CHAIN = [
-  PRIMARY_GEMINI_MODEL,
-  FALLBACK_GEMINI_MODEL,
-  'gemini-2.5-flash',
-] as const;
+function getFastConfigForModel(
+  model: string,
+  baseConfig: Record<string, unknown>
+): Record<string, unknown> {
+  if (model === 'gemini-3.1-flash-lite') {
+    return {
+      ...baseConfig,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+    };
+  }
+  if (model.startsWith('gemini-4-')) {
+    return {
+      ...baseConfig,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+    };
+  }
+  if (model.startsWith('gemini-2.5-')) {
+    return {
+      ...baseConfig,
+      thinkingConfig: { thinkingBudget: 0 },
+    };
+  }
+  return baseConfig;
+}
+
+function buildOrderedModelList(): string[] {
+  const ordered: string[] = [];
+  if (cachedWorkingModel && !unavailableModels.has(cachedWorkingModel)) {
+    ordered.push(cachedWorkingModel);
+  }
+  for (const m of DEFAULT_MODEL_CHAIN) {
+    if (!unavailableModels.has(m) && !ordered.includes(m)) {
+      ordered.push(m);
+    }
+  }
+  return ordered.length > 0 ? ordered : [...DEFAULT_MODEL_CHAIN];
+}
+
+function withHardTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`${label} timed out after ${ms}ms`) as Error & { status?: number };
+      err.status = 504;
+      reject(err);
+    }, ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 async function generateWithFallback(
   buildRequest: (model: string) => {
     contents: unknown;
     config: Record<string, unknown>;
-  }
+  },
+  attemptTimeoutMs = 6_500
 ) {
+  const models = buildOrderedModelList();
   let lastError: unknown;
 
-  for (let i = 0; i < MODEL_FALLBACK_CHAIN.length; i += 1) {
-    const model = MODEL_FALLBACK_CHAIN[i];
-    const isPrimary = i === 0;
+  for (let i = 0; i < models.length; i += 1) {
+    const model = models[i];
     try {
-      const ai = getGeminiClient(isPrimary ? 12_000 : 18_000);
+      const ai = getGeminiClient(attemptTimeoutMs);
       const req = buildRequest(model);
-      const response = await ai.models.generateContent({
-        model,
-        contents: req.contents as Parameters<
-          GoogleGenAI['models']['generateContent']
-        >[0]['contents'],
-        config: isPrimary
-          ? {
-              ...req.config,
-              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-            }
-          : req.config,
-      });
+      const response = await withHardTimeout(
+        ai.models.generateContent({
+          model,
+          contents: req.contents as Parameters<
+            GoogleGenAI['models']['generateContent']
+          >[0]['contents'],
+          config: getFastConfigForModel(model, req.config),
+        }),
+        attemptTimeoutMs,
+        `Gemini (${model})`
+      );
+      cachedWorkingModel = model;
       return { response, model };
     } catch (err) {
       lastError = err;
-      const isLast = i === MODEL_FALLBACK_CHAIN.length - 1;
+      if (isModelNotFoundError(err)) {
+        unavailableModels.add(model);
+        if (cachedWorkingModel === model) cachedWorkingModel = null;
+      }
+      const isLast = i === models.length - 1;
       if (isLast || !isTimeoutOrTransientError(err)) {
         throw err;
       }
@@ -151,9 +253,7 @@ export function getHealthPayload() {
     ok: true,
     model: PRIMARY_GEMINI_MODEL,
     fallbackModel: FALLBACK_GEMINI_MODEL,
-    configured: Boolean(
-      process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY'
-    ),
+    configured: Boolean(resolveGeminiApiKey()),
     runtime: process.env.VERCEL ? 'vercel-serverless' : 'express-node',
   };
 }
@@ -185,47 +285,49 @@ export async function analyzeCallTranscript(body: {
     .map((t) => `[Turn ${t.idx} — ${t.speaker}]: ${t.text}`)
     .join('\n');
 
-  const { response, model } = await generateWithFallback(() => ({
-    contents: `Evaluate this rolling 90-second live phone/video call transcript from India and output the scam risk JSON:\n\n${transcriptBlock}`,
-    config: {
-      systemInstruction: `You are Satark Live's real-time forensic call-scam detection engine protecting Indian families against:
-1. Digital arrest scams (fake CBI, ED, TRAI, Mumbai/Delhi Cyber Crime, Narcotics, Customs officers threatening arrest on Skype/WhatsApp video calls).
-2. Courier/parcel seizure scams in English, Hindi, or Hinglish (e.g. FedEx/DHL parcel seized at customs with illegal passport/MDMA/drugs, Aadhaar linked to money laundering).
-3. Isolation & coercion tactics ("camera band mat karna", "stay on video call", "do not inform family", "lock the room", "non-disclosure agreement").
-4. Financial extortion ("RBI safe custody account", "verification deposit", "transfer savings to clear case", "UPI/RTGS clearance").
-5. Call-merge & OTP traps (asking to merge an incoming call, read out a 6-digit bank/UPI/WhatsApp OTP, install screen-sharing apps like AnyDesk/TeamViewer).
-6. Victim panic/compliance ("please don't arrest me", "I am opening my banking app now", "transferring money now") — this signals imminent financial loss and MUST score 85-98 immediately!
+  const { response, model } = await generateWithFallback(
+    () => ({
+      contents: `Score this live Indian call transcript (90s rolling window) as JSON:\n${transcriptBlock}`,
+      config: {
+        systemInstruction: `You are Satark Live's real-time Indian call-scam forensic classifier. Detect:
+1. Digital arrest scams (fake CBI/ED/TRAI/Cyber Crime/Customs/Narcotics video-call arrest threats; note live speech-to-text often mishears "digital arrest" as "digital age", "digital address", or "digital artist" — treat "under digital age/address/arrest" as a digital arrest threat!).
+2. Courier/parcel seizure scams (English/Hindi/Hinglish: FedEx/DHL parcel seized at customs, drugs/passport, Aadhaar money laundering).
+3. Isolation/coercion ("camera band mat karna", "stay on video call", "do not inform family", "lock the room", "NDA").
+4. Financial extortion ("RBI safe custody account", "verification deposit", "UPI/RTGS clearance").
+5. Call-merge & OTP/screen-share traps (merge call, read 6-digit OTP, install AnyDesk/TeamViewer).
+6. Victim panic/compliance ("don't arrest me", "opening my banking app", "transferring money") -> score 85-98 immediately.
 
-Return ONLY valid JSON matching the schema:
-- score: integer 0-100 representing real-time scam threat severity across the full rolling conversation:
-  * 0-24: benign everyday conversation -> NOMINAL
-  * 25-54: suspicious authority/courier claim without strong coercion yet -> AUTHORITY_CLAIM
-  * 55-74: isolation threats, stay-on-camera orders, fake warrant/FIR pressure -> ISOLATION_COERCION
-  * 75-100: active demand for money/RBI safe-custody transfer, victim complying/opening banking app -> FINANCIAL_EXTORTION (or OTP_TRAP if OTP/call-merge/screen-share is demanded)
-- stage: strictly one of NOMINAL, AUTHORITY_CLAIM, ISOLATION_COERCION, FINANCIAL_EXTORTION, OTP_TRAP.
-- reason: one crisp, authoritative forensic sentence (max 22 words) explaining the exact psychological or legal red flag observed.`,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          score: {
-            type: Type.INTEGER,
-            description: 'Real-time threat risk score from 0 to 100.',
+Scoring bands:
+- 0-24: benign -> NOMINAL
+- 25-54: authority/courier claim without strong coercion -> AUTHORITY_CLAIM
+- 55-74: isolation threats, stay-on-camera, digital arrest claim, fake warrant/FIR -> ISOLATION_COERCION
+- 75-100: money/RBI transfer demand, active digital arrest threat with coercion, or victim complying -> FINANCIAL_EXTORTION (or OTP_TRAP for OTP/call-merge/screen-share).
+
+Output ONLY JSON: { score (0-100 int), stage (exact enum), reason (1 crisp sentence <= 20 words) }.`,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            score: {
+              type: Type.INTEGER,
+              description: 'Real-time threat risk score from 0 to 100.',
+            },
+            stage: {
+              type: Type.STRING,
+              description:
+                'One of NOMINAL, AUTHORITY_CLAIM, ISOLATION_COERCION, FINANCIAL_EXTORTION, OTP_TRAP.',
+            },
+            reason: {
+              type: Type.STRING,
+              description: 'One concise forensic sentence explaining the risk score.',
+            },
           },
-          stage: {
-            type: Type.STRING,
-            description:
-              'One of NOMINAL, AUTHORITY_CLAIM, ISOLATION_COERCION, FINANCIAL_EXTORTION, OTP_TRAP.',
-          },
-          reason: {
-            type: Type.STRING,
-            description: 'One concise forensic sentence explaining the risk score.',
-          },
+          required: ['score', 'stage', 'reason'],
         },
-        required: ['score', 'stage', 'reason'],
       },
-    },
-  }));
+    }),
+    5_500
+  );
 
   const rawText = (response.text ?? '').trim();
   const parsed = JSON.parse(rawText) as {
@@ -346,7 +448,7 @@ Return ONLY valid JSON matching the schema:
         ],
       },
     },
-  }));
+  }), 16_000);
 
   const rawText = (response.text ?? '').trim();
   const parsed = JSON.parse(rawText) as {
