@@ -1,0 +1,8 @@
+{
+  "name": "KOVA — Modern Technology Systems",
+  "description": "Architectural landing page for a modern technology and enterprise systems company built with high-contrast Onyx, Paper White, and Vivid Blue visual geometry.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

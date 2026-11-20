@@ -1,0 +1,271 @@
+@import "tailwindcss";
+
+@theme {
+  --color-vivid-blue: #0000EE;
+  --color-deep-blue: #0000B3;
+  --color-periwinkle: #8C8CF7;
+  --color-pale-blue: #BFBFFB;
+  --color-onyx: #000000;
+  --color-paper: #FFFFFF;
+  --color-mist: #EFEFEF;
+  --color-stone: #8B8B8B;
+
+  --font-display: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-editorial: "Instrument Serif", Georgia, serif;
+  --font-space: "Space Grotesk", "Plus Jakarta Sans", sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #000000;
+    color: #FFFFFF;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+}
+
+/* Signature 4-stop Branding Gradient from the palette specification:
+   #000000 -> #0000B3 -> #0000EE -> #8C8CF7 */
+.bg-brand-gradient {
+  background: linear-gradient(
+    118deg,
+    #000000 0%,
+    #000000 18%,
+    #0000B3 52%,
+    #0000EE 74%,
+    #8C8CF7 100%
+  );
+}
+
+.bg-brand-gradient-horizontal {
+  background: linear-gradient(
+    90deg,
+    #000000 0%,
+    #000000 22%,
+    #0000B3 55%,
+    #0000EE 78%,
+    #8C8CF7 100%
+  );
+}
+
+.bg-brand-hero {
+  background:
+    radial-gradient(ellipse 68% 82% at 88% 26%, rgba(140, 140, 247, 0.85) 0%, rgba(0, 0, 238, 0.72) 34%, rgba(0, 0, 179, 0.35) 60%, rgba(0, 0, 0, 0) 85%),
+    radial-gradient(ellipse 52% 65% at 72% 82%, rgba(0, 0, 238, 0.58) 0%, rgba(0, 0, 179, 0.25) 45%, rgba(0, 0, 0, 0) 80%),
+    #000000;
+}
+
+.bg-brand-aura-right {
+  background:
+    radial-gradient(ellipse 60% 90% at 86% 42%, rgba(140, 140, 247, 0.78) 0%, rgba(0, 0, 238, 0.65) 36%, rgba(0, 0, 179, 0.28) 64%, rgba(0, 0, 0, 0) 88%),
+    #000000;
+}
+
+.bg-brand-aura-left {
+  background:
+    radial-gradient(ellipse 55% 85% at 14% 58%, rgba(140, 140, 247, 0.72) 0%, rgba(0, 0, 238, 0.62) 36%, rgba(0, 0, 179, 0.24) 64%, rgba(0, 0, 0, 0) 88%),
+    #000000;
+}
+
+.bg-brand-aura-center {
+  background:
+    radial-gradient(ellipse 52% 68% at 62% 48%, rgba(140, 140, 247, 0.72) 0%, rgba(0, 0, 238, 0.66) 36%, rgba(0, 0, 179, 0.28) 62%, rgba(0, 0, 0, 0) 86%),
+    #000000;
+}
+
+.bg-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 96px 96px;
+}
+
+.bg-grid-light {
+  background-image:
+    linear-gradient(to right, rgba(0, 0, 0, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.045) 1px, transparent 1px);
+  background-size: 96px 96px;
+}
+
+/* Responsive isometric stack spacing for 360px mobile -> 1440px desktop */
+.iso-stage {
+  --iso-step-x: 24px;
+  --iso-step-y: 10px;
+}
+
+@media (min-width: 480px) {
+  .iso-stage {
+    --iso-step-x: 34px;
+    --iso-step-y: 13px;
+  }
+}
+
+@media (min-width: 768px) {
+  .iso-stage {
+    --iso-step-x: 44px;
+    --iso-step-y: 16px;
+  }
+}
+
+section[id] {
+  scroll-margin-top: 4rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Satark Mobile Prototype — Neon Obsidian Aurora UI (#050508 + Violet/Indigo + Crimson #D61A44) */
+@keyframes auroraFloat {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translate3d(6%, -4%, 0) scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes crimsonPulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes scanBeam {
+  0% {
+    transform: translateY(0%);
+  }
+  50% {
+    transform: translateY(100%);
+  }
+  100% {
+    transform: translateY(0%);
+  }
+}
+
+.satark-obsidian-aurora {
+  background:
+    radial-gradient(ellipse 85% 52% at 50% -8%, rgba(124, 58, 237, 0.36) 0%, rgba(79, 70, 229, 0.2) 38%, rgba(5, 5, 8, 0) 74%),
+    radial-gradient(ellipse 65% 45% at 88% 92%, rgba(99, 102, 241, 0.22) 0%, rgba(5, 5, 8, 0) 70%),
+    #050508;
+}
+
+.satark-crimson-aurora {
+  background:
+    radial-gradient(ellipse 92% 58% at 50% -6%, rgba(214, 26, 68, 0.56) 0%, rgba(159, 18, 57, 0.26) 44%, rgba(5, 5, 8, 0) 78%),
+    radial-gradient(ellipse 75% 48% at 50% 102%, rgba(214, 26, 68, 0.34) 0%, rgba(5, 5, 8, 0) 72%),
+    #050508;
+}
+
+.animate-aurora-float {
+  animation: auroraFloat 9s ease-in-out infinite;
+}
+
+.animate-crimson-pulse {
+  animation: crimsonPulse 1.8s ease-in-out infinite;
+}
+
+.animate-scan-beam {
+  animation: scanBeam 2.1s ease-in-out infinite;
+}
+
+.satark-glass-card {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.025) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+}
+
+.satark-phone-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 140, 247, 0.28) transparent;
+}
+
+.satark-phone-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+
+.satark-phone-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.satark-phone-scroll::-webkit-scrollbar-thumb {
+  background: rgba(140, 140, 247, 0.28);
+  border-radius: 999px;
+}
+
+/* Smoked Black-Tinted Frosted Glass Navbar */
+.satark-nav-glass-top {
+  background: linear-gradient(
+    180deg,
+    rgba(6, 6, 14, 0.28) 0%,
+    rgba(4, 4, 10, 0.12) 100%
+  );
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.satark-nav-glass {
+  background: linear-gradient(
+    180deg,
+    rgba(16, 16, 26, 0.62) 0%,
+    rgba(6, 6, 12, 0.5) 100%
+  );
+  backdrop-filter: blur(26px) saturate(185%);
+  -webkit-backdrop-filter: blur(26px) saturate(185%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 12px 36px -12px rgba(0, 0, 0, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.satark-drawer-glass {
+  background: linear-gradient(
+    180deg,
+    rgba(10, 10, 18, 0.78) 0%,
+    rgba(4, 4, 10, 0.72) 100%
+  );
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+}
+
+/* Lenis buttery inertial scroll rules */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+
