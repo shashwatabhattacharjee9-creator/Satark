@@ -100,10 +100,10 @@ export function Navbar({
 
   return (
     <header
-      className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ease-out ${
+      className={`fixed top-0 inset-x-0 z-50 isolate transform-gpu transition-[background,border-color,box-shadow] duration-300 ease-out ${
         scrolled || mobileOpen
-          ? 'satark-nav-glass'
-          : 'satark-nav-glass-top'
+          ? 'satark-nav-glass backdrop-blur-2xl'
+          : 'satark-nav-glass-top backdrop-blur-md'
       }`}
     >
       <div className="max-w-[1360px] mx-auto px-5 sm:px-6 lg:px-12 h-[72px] sm:h-20 flex items-center justify-between gap-6 lg:gap-8">
