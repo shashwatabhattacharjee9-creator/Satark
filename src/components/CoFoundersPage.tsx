@@ -40,8 +40,10 @@ const FOUNDERS: FounderProfile[] = [
     id: 'hemant',
     name: 'Hemant Rai',
     role: 'Co-Founder · Director of Product, Head of Marketing & AI Supervisor',
-    imageUrl: undefined,
-    imageAlt: 'Portrait placeholder for Hemant Rai, Co-Founder at Satark Live',
+    imageUrl:
+      'https://i.postimg.cc/h4kr53QK/Confident-Monochrome-Studio-Portrait.png',
+    imageAlt:
+      'Portrait of Hemant Rai, Co-Founder, Director of Product, Head of Marketing and AI Supervisor at Satark Live',
     kicker: 'AI Thinktank · Strategic Product, Growth & Adversarial Defense',
     bio: 'Immersed in technology since age 12 and wired with the foresight of a chess grandmaster — always six moves ahead of social-engineering playbooks and market shifts. An unapologetic AI heavyweight and first-principles thinktank shaping how Satark reasons, communicates, and earns trust across Indian households.',
     highlights: [
